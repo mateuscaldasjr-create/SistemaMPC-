@@ -5,3 +5,6 @@ client/build/
 uploads/*
 !uploads/.gitkeep
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
