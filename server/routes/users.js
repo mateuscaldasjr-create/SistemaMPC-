@@ -1,87 +1,125 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { db } = require('../db/database');
+const { supabase } = require('../db/database');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.get('/', authMiddleware, (req, res) => {
-  const { role, search, active } = req.query;
-  let where = [];
-  let params = [];
+router.get('/', authMiddleware, async (req, res) => {
+  try {
+    const { role, search, active } = req.query;
 
-  if (role) { where.push('role = ?'); params.push(role); }
-  if (active !== undefined) { where.push('active = ?'); params.push(active); }
-  if (search) {
-    where.push('(name LIKE ? OR email LIKE ?)');
-    params.push(`%${search}%`, `%${search}%`);
+    let query = supabase.from('users').select('id, name, email, role, phone, active, created_at');
+
+    if (role) query = query.eq('role', role);
+    if (active !== undefined) query = query.eq('active', active === 'true' || active === '1');
+    if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
+
+    const { data: users } = await query.order('name');
+
+    // Get ticket counts for each user
+    const enriched = await Promise.all((users || []).map(async (u) => {
+      const { count: ticket_count } = await supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('assigned_to', u.id);
+      const { count: completed_count } = await supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('assigned_to', u.id).eq('status', 'concluido');
+      return { ...u, ticket_count: ticket_count || 0, completed_count: completed_count || 0 };
+    }));
+
+    res.json(enriched);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
-
-  const users = db.prepare(`
-    SELECT id, name, email, role, phone, active, created_at,
-      (SELECT COUNT(*) FROM tickets WHERE assigned_to = users.id) as ticket_count,
-      (SELECT COUNT(*) FROM tickets WHERE assigned_to = users.id AND status = 'concluido') as completed_count
-    FROM users ${whereClause} ORDER BY name ASC
-  `).all(...params);
-
-  res.json(users);
 });
 
-router.get('/technicians', authMiddleware, (req, res) => {
-  const technicians = db.prepare(`
-    SELECT id, name, email, phone, role,
-      (SELECT COUNT(*) FROM tickets WHERE assigned_to = users.id AND status NOT IN ('concluido', 'cancelado')) as active_tickets
-    FROM users WHERE role IN ('tecnico', 'gestor', 'admin') AND active = 1 ORDER BY name
-  `).all();
-  res.json(technicians);
-});
+router.get('/technicians', authMiddleware, async (req, res) => {
+  try {
+    const { data: technicians } = await supabase.from('users')
+      .select('id, name, email, phone, role')
+      .in('role', ['tecnico', 'gestor', 'admin'])
+      .eq('active', true)
+      .order('name');
 
-router.get('/:id', authMiddleware, (req, res) => {
-  const user = db.prepare('SELECT id, name, email, role, phone, active, created_at FROM users WHERE id = ?').get(req.params.id);
-  if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
-  res.json(user);
-});
+    const enriched = await Promise.all((technicians || []).map(async (t) => {
+      const { count: active_tickets } = await supabase.from('tickets')
+        .select('*', { count: 'exact', head: true })
+        .eq('assigned_to', t.id)
+        .not('status', 'in', '(concluido,cancelado)');
+      return { ...t, active_tickets: active_tickets || 0 };
+    }));
 
-router.post('/', authMiddleware, adminOnly, (req, res) => {
-  const { name, email, password, role, phone } = req.body;
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
+    res.json(enriched);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-  if (existing) {
-    return res.status(400).json({ error: 'Email já cadastrado' });
-  }
-
-  const hashedPassword = bcrypt.hashSync(password, 10);
-  const result = db.prepare('INSERT INTO users (name, email, password, role, phone) VALUES (?, ?, ?, ?, ?)')
-    .run(name, email, hashedPassword, role || 'tecnico', phone);
-
-  const user = db.prepare('SELECT id, name, email, role, phone, active, created_at FROM users WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(user);
 });
 
-router.put('/:id', authMiddleware, adminOnly, (req, res) => {
-  const { name, email, role, phone, active, password } = req.body;
+router.get('/:id', authMiddleware, async (req, res) => {
+  try {
+    const { data: user } = await supabase.from('users')
+      .select('id, name, email, role, phone, active, created_at')
+      .eq('id', req.params.id).single();
 
-  if (password) {
+    if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { name, email, password, role, phone } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
+    }
+
+    const { data: existing } = await supabase.from('users').select('id').eq('email', email).maybeSingle();
+    if (existing) {
+      return res.status(400).json({ error: 'Email já cadastrado' });
+    }
+
     const hashedPassword = bcrypt.hashSync(password, 10);
-    db.prepare('UPDATE users SET name = ?, email = ?, role = ?, phone = ?, active = ?, password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .run(name, email, role, phone, active ?? 1, hashedPassword, req.params.id);
-  } else {
-    db.prepare('UPDATE users SET name = ?, email = ?, role = ?, phone = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .run(name, email, role, phone, active ?? 1, req.params.id);
-  }
+    const { data: user, error } = await supabase.from('users').insert({
+      name, email, password: hashedPassword, role: role || 'tecnico', phone
+    }).select('id, name, email, role, phone, active, created_at').single();
 
-  const user = db.prepare('SELECT id, name, email, role, phone, active, created_at FROM users WHERE id = ?').get(req.params.id);
-  res.json(user);
+    if (error) throw error;
+    res.status(201).json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.delete('/:id', authMiddleware, adminOnly, (req, res) => {
-  db.prepare('UPDATE users SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Usuário desativado' });
+router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { name, email, role, phone, active, password } = req.body;
+
+    const updates = {
+      name, email, role, phone, active: active ?? true,
+      updated_at: new Date().toISOString()
+    };
+
+    if (password) {
+      updates.password = bcrypt.hashSync(password, 10);
+    }
+
+    const { data: user, error } = await supabase.from('users').update(updates)
+      .eq('id', req.params.id)
+      .select('id, name, email, role, phone, active, created_at').single();
+
+    if (error) throw error;
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    await supabase.from('users').update({ active: false, updated_at: new Date().toISOString() }).eq('id', req.params.id);
+    res.json({ message: 'Usuário desativado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

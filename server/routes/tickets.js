@@ -1,256 +1,254 @@
 const express = require('express');
-const { db } = require('../db/database');
+const { supabase } = require('../db/database');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
 
 const router = express.Router();
 
-function generateTicketNumber() {
+async function generateTicketNumber() {
   const year = new Date().getFullYear();
-  const last = db.prepare("SELECT ticket_number FROM tickets ORDER BY id DESC LIMIT 1").get();
+  const { data } = await supabase.from('tickets').select('ticket_number').order('id', { ascending: false }).limit(1);
   let seq = 1;
-  if (last) {
-    const parts = last.ticket_number.split('-');
+  if (data && data.length > 0) {
+    const parts = data[0].ticket_number.split('-');
     seq = parseInt(parts[2]) + 1;
   }
   return `CHM-${year}-${String(seq).padStart(4, '0')}`;
 }
 
-// List all tickets with filters
-router.get('/', authMiddleware, (req, res) => {
-  const { status, priority, type, client_id, assigned_to, search, page = 1, limit = 20 } = req.query;
-  let where = [];
-  let params = [];
+// List tickets
+router.get('/', authMiddleware, async (req, res) => {
+  try {
+    const { status, priority, type, client_id, assigned_to, search, page = 1, limit = 20 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
 
-  if (status) { where.push('t.status = ?'); params.push(status); }
-  if (priority) { where.push('t.priority = ?'); params.push(priority); }
-  if (type) { where.push('t.type = ?'); params.push(type); }
-  if (client_id) { where.push('t.client_id = ?'); params.push(client_id); }
-  if (assigned_to) { where.push('t.assigned_to = ?'); params.push(assigned_to); }
-  if (search) {
-    where.push('(t.title LIKE ? OR t.description LIKE ? OR t.ticket_number LIKE ?)');
-    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    let query = supabase.from('tickets').select(`
+      *,
+      clients!tickets_client_id_fkey(name, company),
+      assigned:users!tickets_assigned_to_fkey(name),
+      creator:users!tickets_created_by_fkey(name),
+      equipment!tickets_equipment_id_fkey(name)
+    `, { count: 'exact' });
+
+    if (status) query = query.eq('status', status);
+    if (priority) query = query.eq('priority', priority);
+    if (type) query = query.eq('type', type);
+    if (client_id) query = query.eq('client_id', client_id);
+    if (assigned_to) query = query.eq('assigned_to', assigned_to);
+    if (search) query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%,ticket_number.ilike.%${search}%`);
+
+    if (req.user.role === 'tecnico') {
+      query = query.eq('assigned_to', req.user.id);
+    }
+
+    const { data, count, error } = await query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + parseInt(limit) - 1);
+
+    if (error) throw error;
+
+    const tickets = (data || []).map(t => ({
+      ...t,
+      client_name: t.clients?.name,
+      client_company: t.clients?.company,
+      assigned_name: t.assigned?.name,
+      creator_name: t.creator?.name,
+      equipment_name: t.equipment?.name,
+    }));
+
+    res.json({ tickets, total: count || 0, page: parseInt(page), totalPages: Math.ceil((count || 0) / parseInt(limit)) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  // If technician, only show assigned tickets
-  if (req.user.role === 'tecnico') {
-    where.push('t.assigned_to = ?');
-    params.push(req.user.id);
-  }
-
-  const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-
-  const total = db.prepare(`SELECT COUNT(*) as count FROM tickets t ${whereClause}`).get(...params).count;
-
-  const tickets = db.prepare(`
-    SELECT t.*,
-      c.name as client_name, c.company as client_company,
-      u.name as assigned_name,
-      cr.name as creator_name,
-      e.name as equipment_name
-    FROM tickets t
-    LEFT JOIN clients c ON t.client_id = c.id
-    LEFT JOIN users u ON t.assigned_to = u.id
-    LEFT JOIN users cr ON t.created_by = cr.id
-    LEFT JOIN equipment e ON t.equipment_id = e.id
-    ${whereClause}
-    ORDER BY
-      CASE t.priority WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2 WHEN 'media' THEN 3 WHEN 'baixa' THEN 4 END,
-      t.created_at DESC
-    LIMIT ? OFFSET ?
-  `).all(...params, parseInt(limit), offset);
-
-  res.json({ tickets, total, page: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)) });
 });
 
-// Get ticket stats
-router.get('/stats', authMiddleware, (req, res) => {
-  const stats = {
-    total: db.prepare('SELECT COUNT(*) as count FROM tickets').get().count,
-    abertos: db.prepare("SELECT COUNT(*) as count FROM tickets WHERE status IN ('aberto', 'aprovado')").get().count,
-    em_andamento: db.prepare("SELECT COUNT(*) as count FROM tickets WHERE status = 'em_andamento'").get().count,
-    aguardando: db.prepare("SELECT COUNT(*) as count FROM tickets WHERE status = 'aguardando'").get().count,
-    concluidos: db.prepare("SELECT COUNT(*) as count FROM tickets WHERE status = 'concluido'").get().count,
-    cancelados: db.prepare("SELECT COUNT(*) as count FROM tickets WHERE status = 'cancelado'").get().count,
-    urgentes: db.prepare("SELECT COUNT(*) as count FROM tickets WHERE priority = 'urgente' AND status NOT IN ('concluido', 'cancelado')").get().count,
-    by_type: db.prepare("SELECT type, COUNT(*) as count FROM tickets GROUP BY type").all(),
-    by_priority: db.prepare("SELECT priority, COUNT(*) as count FROM tickets WHERE status NOT IN ('concluido', 'cancelado') GROUP BY priority").all(),
-    by_status: db.prepare("SELECT status, COUNT(*) as count FROM tickets GROUP BY status").all(),
-    recent: db.prepare(`
-      SELECT t.*, c.name as client_name, u.name as assigned_name
-      FROM tickets t
-      LEFT JOIN clients c ON t.client_id = c.id
-      LEFT JOIN users u ON t.assigned_to = u.id
-      ORDER BY t.created_at DESC LIMIT 5
-    `).all(),
-    monthly: db.prepare(`
-      SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count
-      FROM tickets
-      GROUP BY strftime('%Y-%m', created_at)
-      ORDER BY month DESC LIMIT 12
-    `).all()
-  };
-  res.json(stats);
+// Stats
+router.get('/stats', authMiddleware, async (req, res) => {
+  try {
+    const { data: all } = await supabase.from('tickets').select('status, type, priority, created_at');
+    const rows = all || [];
+
+    const stats = {
+      total: rows.length,
+      abertos: rows.filter(r => r.status === 'aberto' || r.status === 'aprovado').length,
+      em_andamento: rows.filter(r => r.status === 'em_andamento').length,
+      aguardando: rows.filter(r => r.status === 'aguardando').length,
+      concluidos: rows.filter(r => r.status === 'concluido').length,
+      cancelados: rows.filter(r => r.status === 'cancelado').length,
+      urgentes: rows.filter(r => r.priority === 'urgente' && !['concluido', 'cancelado'].includes(r.status)).length,
+      by_type: Object.entries(rows.reduce((a, r) => { a[r.type] = (a[r.type] || 0) + 1; return a; }, {})).map(([type, count]) => ({ type, count })),
+      by_priority: Object.entries(rows.filter(r => !['concluido', 'cancelado'].includes(r.status)).reduce((a, r) => { a[r.priority] = (a[r.priority] || 0) + 1; return a; }, {})).map(([priority, count]) => ({ priority, count })),
+      by_status: Object.entries(rows.reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {})).map(([status, count]) => ({ status, count })),
+      monthly: Object.entries(rows.reduce((a, r) => { const m = r.created_at?.substring(0, 7); if (m) a[m] = (a[m] || 0) + 1; return a; }, {})).map(([month, count]) => ({ month, count })).sort((a, b) => b.month.localeCompare(a.month)).slice(0, 12),
+    };
+
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get single ticket
-router.get('/:id', authMiddleware, (req, res) => {
-  const ticket = db.prepare(`
-    SELECT t.*,
-      c.name as client_name, c.company as client_company, c.phone as client_phone, c.email as client_email,
-      u.name as assigned_name, u.phone as assigned_phone,
-      cr.name as creator_name,
-      e.name as equipment_name, e.model as equipment_model, e.serial_number as equipment_serial
-    FROM tickets t
-    LEFT JOIN clients c ON t.client_id = c.id
-    LEFT JOIN users u ON t.assigned_to = u.id
-    LEFT JOIN users cr ON t.created_by = cr.id
-    LEFT JOIN equipment e ON t.equipment_id = e.id
-    WHERE t.id = ?
-  `).get(req.params.id);
+router.get('/:id', authMiddleware, async (req, res) => {
+  try {
+    const { data: ticket } = await supabase.from('tickets').select(`
+      *,
+      clients!tickets_client_id_fkey(name, company, phone, email),
+      assigned:users!tickets_assigned_to_fkey(name, phone),
+      creator:users!tickets_created_by_fkey(name),
+      equipment!tickets_equipment_id_fkey(name, model, serial_number)
+    `).eq('id', req.params.id).single();
 
-  if (!ticket) {
-    return res.status(404).json({ error: 'Chamado não encontrado' });
+    if (!ticket) return res.status(404).json({ error: 'Chamado não encontrado' });
+
+    const { data: comments } = await supabase.from('ticket_comments').select(`
+      *, users!ticket_comments_user_id_fkey(name, role)
+    `).eq('ticket_id', req.params.id).order('created_at', { ascending: false });
+
+    const { data: history } = await supabase.from('ticket_history').select(`
+      *, users!ticket_history_user_id_fkey(name)
+    `).eq('ticket_id', req.params.id).order('created_at', { ascending: false });
+
+    const { data: serviceOrders } = await supabase.from('service_orders').select(`
+      *, users!service_orders_technician_id_fkey(name)
+    `).eq('ticket_id', req.params.id).order('created_at', { ascending: false });
+
+    res.json({
+      ...ticket,
+      client_name: ticket.clients?.name,
+      client_company: ticket.clients?.company,
+      client_phone: ticket.clients?.phone,
+      client_email: ticket.clients?.email,
+      assigned_name: ticket.assigned?.name,
+      assigned_phone: ticket.assigned?.phone,
+      creator_name: ticket.creator?.name,
+      equipment_name: ticket.equipment?.name,
+      equipment_model: ticket.equipment?.model,
+      equipment_serial: ticket.equipment?.serial_number,
+      comments: (comments || []).map(c => ({ ...c, user_name: c.users?.name, user_role: c.users?.role })),
+      history: (history || []).map(h => ({ ...h, user_name: h.users?.name })),
+      serviceOrders: (serviceOrders || []).map(so => ({ ...so, technician_name: so.users?.name })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const comments = db.prepare(`
-    SELECT tc.*, u.name as user_name, u.role as user_role
-    FROM ticket_comments tc
-    LEFT JOIN users u ON tc.user_id = u.id
-    WHERE tc.ticket_id = ?
-    ORDER BY tc.created_at DESC
-  `).all(req.params.id);
-
-  const history = db.prepare(`
-    SELECT th.*, u.name as user_name
-    FROM ticket_history th
-    LEFT JOIN users u ON th.user_id = u.id
-    WHERE th.ticket_id = ?
-    ORDER BY th.created_at DESC
-  `).all(req.params.id);
-
-  const serviceOrders = db.prepare(`
-    SELECT so.*, u.name as technician_name
-    FROM service_orders so
-    LEFT JOIN users u ON so.technician_id = u.id
-    WHERE so.ticket_id = ?
-    ORDER BY so.created_at DESC
-  `).all(req.params.id);
-
-  res.json({ ...ticket, comments, history, serviceOrders });
 });
 
 // Create ticket
-router.post('/', authMiddleware, (req, res) => {
-  const { title, description, type, priority, client_id, equipment_id, assigned_to, scheduled_date, address, contact_name, contact_phone, notes } = req.body;
+router.post('/', authMiddleware, async (req, res) => {
+  try {
+    const { title, description, type, priority, client_id, equipment_id, assigned_to, scheduled_date, address, contact_name, contact_phone, notes } = req.body;
+    if (!title) return res.status(400).json({ error: 'Título é obrigatório' });
 
-  if (!title) {
-    return res.status(400).json({ error: 'Título é obrigatório' });
+    const ticket_number = await generateTicketNumber();
+
+    const { data: ticket, error } = await supabase.from('tickets').insert({
+      ticket_number, title, description, type: type || 'corretiva', priority: priority || 'media',
+      client_id: client_id || null, equipment_id: equipment_id || null, assigned_to: assigned_to || null,
+      created_by: req.user.id, scheduled_date: scheduled_date || null, address, contact_name, contact_phone, notes
+    }).select().single();
+
+    if (error) throw error;
+
+    await supabase.from('ticket_history').insert({
+      ticket_id: ticket.id, user_id: req.user.id, action: 'criado', new_value: 'Chamado criado'
+    });
+
+    res.status(201).json(ticket);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const ticket_number = generateTicketNumber();
-
-  const result = db.prepare(`
-    INSERT INTO tickets (ticket_number, title, description, type, priority, client_id, equipment_id, assigned_to, created_by, scheduled_date, address, contact_name, contact_phone, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(ticket_number, title, description, type || 'corretiva', priority || 'media', client_id || null, equipment_id || null, assigned_to || null, req.user.id, scheduled_date || null, address, contact_name, contact_phone, notes);
-
-  db.prepare('INSERT INTO ticket_history (ticket_id, user_id, action, new_value) VALUES (?, ?, ?, ?)')
-    .run(result.lastInsertRowid, req.user.id, 'criado', 'Chamado criado');
-
-  const ticket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(ticket);
 });
 
 // Update ticket
-router.put('/:id', authMiddleware, (req, res) => {
-  const ticket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(req.params.id);
-  if (!ticket) {
-    return res.status(404).json({ error: 'Chamado não encontrado' });
+router.put('/:id', authMiddleware, async (req, res) => {
+  try {
+    const { data: ticket } = await supabase.from('tickets').select('*').eq('id', req.params.id).single();
+    if (!ticket) return res.status(404).json({ error: 'Chamado não encontrado' });
+
+    const { title, description, type, priority, status, client_id, equipment_id, assigned_to, scheduled_date, address, contact_name, contact_phone, notes, estimated_hours, cost } = req.body;
+
+    if (status && status !== ticket.status) {
+      await supabase.from('ticket_history').insert({
+        ticket_id: parseInt(req.params.id), user_id: req.user.id, action: 'status_alterado', old_value: ticket.status, new_value: status
+      });
+    }
+
+    if (assigned_to && assigned_to !== ticket.assigned_to) {
+      const { data: tech } = await supabase.from('users').select('name').eq('id', assigned_to).single();
+      await supabase.from('ticket_history').insert({
+        ticket_id: parseInt(req.params.id), user_id: req.user.id, action: 'atribuido', old_value: '', new_value: tech?.name || ''
+      });
+    }
+
+    const completed_date = status === 'concluido' ? new Date().toISOString() : ticket.completed_date;
+
+    const { data: updated, error } = await supabase.from('tickets').update({
+      title: title || ticket.title, description: description ?? ticket.description, type: type || ticket.type,
+      priority: priority || ticket.priority, status: status || ticket.status,
+      client_id: client_id ?? ticket.client_id, equipment_id: equipment_id ?? ticket.equipment_id,
+      assigned_to: assigned_to ?? ticket.assigned_to, scheduled_date: scheduled_date ?? ticket.scheduled_date,
+      address: address ?? ticket.address, contact_name: contact_name ?? ticket.contact_name,
+      contact_phone: contact_phone ?? ticket.contact_phone, notes: notes ?? ticket.notes,
+      estimated_hours: estimated_hours ?? ticket.estimated_hours, cost: cost ?? ticket.cost,
+      completed_date, updated_at: new Date().toISOString()
+    }).eq('id', req.params.id).select().single();
+
+    if (error) throw error;
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const { title, description, type, priority, status, client_id, equipment_id, assigned_to, scheduled_date, address, contact_name, contact_phone, notes, estimated_hours, cost } = req.body;
-
-  // Track status change
-  if (status && status !== ticket.status) {
-    db.prepare('INSERT INTO ticket_history (ticket_id, user_id, action, old_value, new_value) VALUES (?, ?, ?, ?, ?)')
-      .run(req.params.id, req.user.id, 'status_alterado', ticket.status, status);
-  }
-
-  if (assigned_to && assigned_to !== ticket.assigned_to) {
-    const tech = db.prepare('SELECT name FROM users WHERE id = ?').get(assigned_to);
-    db.prepare('INSERT INTO ticket_history (ticket_id, user_id, action, old_value, new_value) VALUES (?, ?, ?, ?, ?)')
-      .run(req.params.id, req.user.id, 'atribuido', '', tech ? tech.name : '');
-  }
-
-  const completed_date = status === 'concluido' ? new Date().toISOString() : ticket.completed_date;
-
-  db.prepare(`
-    UPDATE tickets SET
-      title = ?, description = ?, type = ?, priority = ?, status = ?,
-      client_id = ?, equipment_id = ?, assigned_to = ?, scheduled_date = ?,
-      address = ?, contact_name = ?, contact_phone = ?, notes = ?,
-      estimated_hours = ?, cost = ?, completed_date = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(
-    title || ticket.title, description ?? ticket.description, type || ticket.type,
-    priority || ticket.priority, status || ticket.status,
-    client_id ?? ticket.client_id, equipment_id ?? ticket.equipment_id,
-    assigned_to ?? ticket.assigned_to, scheduled_date ?? ticket.scheduled_date,
-    address ?? ticket.address, contact_name ?? ticket.contact_name,
-    contact_phone ?? ticket.contact_phone, notes ?? ticket.notes,
-    estimated_hours ?? ticket.estimated_hours, cost ?? ticket.cost,
-    completed_date, req.params.id
-  );
-
-  const updated = db.prepare('SELECT * FROM tickets WHERE id = ?').get(req.params.id);
-  res.json(updated);
 });
 
 // Add comment
-router.post('/:id/comments', authMiddleware, (req, res) => {
-  const { comment, is_internal } = req.body;
+router.post('/:id/comments', authMiddleware, async (req, res) => {
+  try {
+    const { comment, is_internal } = req.body;
+    if (!comment) return res.status(400).json({ error: 'Comentário é obrigatório' });
 
-  if (!comment) {
-    return res.status(400).json({ error: 'Comentário é obrigatório' });
+    await supabase.from('ticket_comments').insert({
+      ticket_id: parseInt(req.params.id), user_id: req.user.id, comment, is_internal: !!is_internal
+    });
+
+    await supabase.from('ticket_history').insert({
+      ticket_id: parseInt(req.params.id), user_id: req.user.id, action: 'comentario', new_value: 'Novo comentário adicionado'
+    });
+
+    res.status(201).json({ message: 'Comentário adicionado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  db.prepare('INSERT INTO ticket_comments (ticket_id, user_id, comment, is_internal) VALUES (?, ?, ?, ?)')
-    .run(req.params.id, req.user.id, comment, is_internal ? 1 : 0);
-
-  db.prepare('INSERT INTO ticket_history (ticket_id, user_id, action, new_value) VALUES (?, ?, ?, ?)')
-    .run(req.params.id, req.user.id, 'comentario', 'Novo comentário adicionado');
-
-  res.status(201).json({ message: 'Comentário adicionado' });
 });
 
 // Delete ticket
-router.delete('/:id', authMiddleware, adminOnly, (req, res) => {
-  db.prepare('DELETE FROM ticket_comments WHERE ticket_id = ?').run(req.params.id);
-  db.prepare('DELETE FROM ticket_history WHERE ticket_id = ?').run(req.params.id);
-  db.prepare('DELETE FROM tickets WHERE id = ?').run(req.params.id);
+router.delete('/:id', authMiddleware, adminOnly, async (req, res) => {
+  await supabase.from('ticket_comments').delete().eq('ticket_id', req.params.id);
+  await supabase.from('ticket_history').delete().eq('ticket_id', req.params.id);
+  await supabase.from('tickets').delete().eq('id', req.params.id);
   res.json({ message: 'Chamado excluído' });
 });
 
-// Public ticket creation (no auth required)
-router.post('/public', (req, res) => {
-  const { title, description, type, priority, contact_name, contact_phone, client_id, address } = req.body;
+// Public ticket creation
+router.post('/public', async (req, res) => {
+  try {
+    const { title, description, type, priority, contact_name, contact_phone, client_id, address } = req.body;
+    if (!title || !contact_name) return res.status(400).json({ error: 'Título e nome de contato são obrigatórios' });
 
-  if (!title || !contact_name) {
-    return res.status(400).json({ error: 'Título e nome de contato são obrigatórios' });
+    const ticket_number = await generateTicketNumber();
+
+    const { data: ticket } = await supabase.from('tickets').insert({
+      ticket_number, title, description, type: type || 'corretiva', priority: priority || 'media',
+      client_id: client_id || null, contact_name, contact_phone, address
+    }).select().single();
+
+    await supabase.from('ticket_history').insert({
+      ticket_id: ticket.id, action: 'criado', new_value: 'Chamado aberto pelo cliente'
+    });
+
+    res.status(201).json({ ticket_number, message: 'Chamado aberto com sucesso!' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const ticket_number = generateTicketNumber();
-
-  const result = db.prepare(`
-    INSERT INTO tickets (ticket_number, title, description, type, priority, client_id, contact_name, contact_phone, address)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(ticket_number, title, description, type || 'corretiva', priority || 'media', client_id || null, contact_name, contact_phone, address);
-
-  db.prepare('INSERT INTO ticket_history (ticket_id, action, new_value) VALUES (?, ?, ?)')
-    .run(result.lastInsertRowid, 'criado', 'Chamado aberto pelo cliente');
-
-  res.status(201).json({ ticket_number, message: 'Chamado aberto com sucesso!' });
 });
 
 module.exports = router;

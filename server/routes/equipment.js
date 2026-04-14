@@ -1,89 +1,115 @@
 const express = require('express');
-const { db } = require('../db/database');
+const { supabase } = require('../db/database');
 const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.get('/', authMiddleware, (req, res) => {
-  const { search, client_id, status, category, page = 1, limit = 50 } = req.query;
-  let where = [];
-  let params = [];
+router.get('/', authMiddleware, async (req, res) => {
+  try {
+    const { search, client_id, status, category, page = 1, limit = 50 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
 
-  if (search) {
-    where.push('(e.name LIKE ? OR e.model LIKE ? OR e.serial_number LIKE ? OR e.brand LIKE ?)');
-    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    let query = supabase.from('equipment').select(`
+      *, clients!equipment_client_id_fkey(name, company)
+    `, { count: 'exact' });
+
+    if (search) {
+      query = query.or(`name.ilike.%${search}%,model.ilike.%${search}%,serial_number.ilike.%${search}%,brand.ilike.%${search}%`);
+    }
+    if (client_id) query = query.eq('client_id', client_id);
+    if (status) query = query.eq('status', status);
+    if (category) query = query.eq('category', category);
+
+    const { data, count } = await query.order('name').range(offset, offset + parseInt(limit) - 1);
+
+    const equipments = (data || []).map(e => ({
+      ...e,
+      client_name: e.clients?.name,
+      client_company: e.clients?.company,
+    }));
+
+    res.json({ equipments, total: count || 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  if (client_id) { where.push('e.client_id = ?'); params.push(client_id); }
-  if (status) { where.push('e.status = ?'); params.push(status); }
-  if (category) { where.push('e.category = ?'); params.push(category); }
-
-  const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-
-  const total = db.prepare(`SELECT COUNT(*) as count FROM equipment e ${whereClause}`).get(...params).count;
-  const equipments = db.prepare(`
-    SELECT e.*, c.name as client_name, c.company as client_company
-    FROM equipment e
-    LEFT JOIN clients c ON e.client_id = c.id
-    ${whereClause}
-    ORDER BY e.name ASC LIMIT ? OFFSET ?
-  `).all(...params, parseInt(limit), offset);
-
-  res.json({ equipments, total });
 });
 
-router.get('/categories', authMiddleware, (req, res) => {
-  const categories = db.prepare('SELECT DISTINCT category FROM equipment WHERE category IS NOT NULL ORDER BY category').all();
-  res.json(categories.map(c => c.category));
+router.get('/categories', authMiddleware, async (req, res) => {
+  try {
+    const { data } = await supabase.from('equipment').select('category').not('category', 'is', null);
+    const categories = [...new Set((data || []).map(c => c.category))].sort();
+    res.json(categories);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.get('/:id', authMiddleware, (req, res) => {
-  const equipment = db.prepare(`
-    SELECT e.*, c.name as client_name, c.company as client_company
-    FROM equipment e
-    LEFT JOIN clients c ON e.client_id = c.id
-    WHERE e.id = ?
-  `).get(req.params.id);
-  if (!equipment) return res.status(404).json({ error: 'Equipamento não encontrado' });
+router.get('/:id', authMiddleware, async (req, res) => {
+  try {
+    const { data: equipment } = await supabase.from('equipment').select(`
+      *, clients!equipment_client_id_fkey(name, company)
+    `).eq('id', req.params.id).single();
 
-  const tickets = db.prepare(`
-    SELECT t.*, u.name as assigned_name
-    FROM tickets t LEFT JOIN users u ON t.assigned_to = u.id
-    WHERE t.equipment_id = ? ORDER BY t.created_at DESC
-  `).all(req.params.id);
+    if (!equipment) return res.status(404).json({ error: 'Equipamento não encontrado' });
 
-  res.json({ ...equipment, tickets });
+    const { data: tickets } = await supabase.from('tickets').select(`
+      *, assigned:users!tickets_assigned_to_fkey(name)
+    `).eq('equipment_id', req.params.id).order('created_at', { ascending: false });
+
+    const ticketsMapped = (tickets || []).map(t => ({ ...t, assigned_name: t.assigned?.name }));
+
+    res.json({
+      ...equipment,
+      client_name: equipment.clients?.name,
+      client_company: equipment.clients?.company,
+      tickets: ticketsMapped,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.post('/', authMiddleware, (req, res) => {
-  const { name, model, serial_number, brand, category, client_id, location, status, notes } = req.body;
-  if (!name) return res.status(400).json({ error: 'Nome é obrigatório' });
+router.post('/', authMiddleware, async (req, res) => {
+  try {
+    const { name, model, serial_number, brand, category, client_id, location, status, notes } = req.body;
+    if (!name) return res.status(400).json({ error: 'Nome é obrigatório' });
 
-  const result = db.prepare(`
-    INSERT INTO equipment (name, model, serial_number, brand, category, client_id, location, status, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(name, model, serial_number, brand, category, client_id || null, location, status || 'ativo', notes);
+    const { data: equipment, error } = await supabase.from('equipment').insert({
+      name, model, serial_number, brand, category,
+      client_id: client_id || null, location, status: status || 'ativo', notes
+    }).select().single();
 
-  const equipment = db.prepare('SELECT * FROM equipment WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(equipment);
+    if (error) throw error;
+    res.status(201).json(equipment);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.put('/:id', authMiddleware, (req, res) => {
-  const { name, model, serial_number, brand, category, client_id, location, status, notes } = req.body;
+router.put('/:id', authMiddleware, async (req, res) => {
+  try {
+    const { name, model, serial_number, brand, category, client_id, location, status, notes } = req.body;
 
-  db.prepare(`
-    UPDATE equipment SET name = ?, model = ?, serial_number = ?, brand = ?, category = ?,
-    client_id = ?, location = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(name, model, serial_number, brand, category, client_id || null, location, status, notes, req.params.id);
+    const { data: equipment, error } = await supabase.from('equipment').update({
+      name, model, serial_number, brand, category,
+      client_id: client_id || null, location, status, notes,
+      updated_at: new Date().toISOString()
+    }).eq('id', req.params.id).select().single();
 
-  const equipment = db.prepare('SELECT * FROM equipment WHERE id = ?').get(req.params.id);
-  res.json(equipment);
+    if (error) throw error;
+    res.json(equipment);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.delete('/:id', authMiddleware, (req, res) => {
-  db.prepare('DELETE FROM equipment WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Equipamento excluído' });
+router.delete('/:id', authMiddleware, async (req, res) => {
+  try {
+    await supabase.from('equipment').delete().eq('id', req.params.id);
+    res.json({ message: 'Equipamento excluído' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

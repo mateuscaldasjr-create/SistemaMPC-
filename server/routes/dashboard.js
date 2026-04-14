@@ -1,84 +1,135 @@
 const express = require('express');
-const { db } = require('../db/database');
+const { supabase } = require('../db/database');
 const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.get('/', authMiddleware, (req, res) => {
-  const dashboard = {
-    tickets: {
-      total: db.prepare('SELECT COUNT(*) as count FROM tickets').get().count,
-      abertos: db.prepare("SELECT COUNT(*) as count FROM tickets WHERE status IN ('aberto', 'aprovado')").get().count,
-      em_andamento: db.prepare("SELECT COUNT(*) as count FROM tickets WHERE status = 'em_andamento'").get().count,
-      aguardando: db.prepare("SELECT COUNT(*) as count FROM tickets WHERE status = 'aguardando'").get().count,
-      concluidos: db.prepare("SELECT COUNT(*) as count FROM tickets WHERE status = 'concluido'").get().count,
-      cancelados: db.prepare("SELECT COUNT(*) as count FROM tickets WHERE status = 'cancelado'").get().count,
-      urgentes: db.prepare("SELECT COUNT(*) as count FROM tickets WHERE priority = 'urgente' AND status NOT IN ('concluido', 'cancelado')").get().count
-    },
-    serviceOrders: {
-      total: db.prepare('SELECT COUNT(*) as count FROM service_orders').get().count,
-      em_execucao: db.prepare("SELECT COUNT(*) as count FROM service_orders WHERE status = 'em_execucao'").get().count,
-      finalizadas: db.prepare("SELECT COUNT(*) as count FROM service_orders WHERE status = 'finalizada'").get().count,
-      pendentes: db.prepare("SELECT COUNT(*) as count FROM service_orders WHERE status = 'pendente'").get().count,
-      revenue: db.prepare("SELECT COALESCE(SUM(cost_total), 0) as total FROM service_orders WHERE status = 'finalizada'").get().total
-    },
-    clients: {
-      total: db.prepare('SELECT COUNT(*) as count FROM clients WHERE active = 1').get().count
-    },
-    equipment: {
-      total: db.prepare('SELECT COUNT(*) as count FROM equipment').get().count,
-      em_manutencao: db.prepare("SELECT COUNT(*) as count FROM equipment WHERE status = 'manutencao'").get().count
-    },
-    technicians: {
-      total: db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'tecnico' AND active = 1").get().count,
-      with_tickets: db.prepare(`
-        SELECT COUNT(DISTINCT assigned_to) as count FROM tickets
-        WHERE status IN ('em_andamento', 'aberto', 'aprovado') AND assigned_to IS NOT NULL
-      `).get().count
-    },
-    charts: {
-      ticketsByStatus: db.prepare("SELECT status, COUNT(*) as count FROM tickets GROUP BY status").all(),
-      ticketsByType: db.prepare("SELECT type, COUNT(*) as count FROM tickets GROUP BY type").all(),
-      ticketsByPriority: db.prepare("SELECT priority, COUNT(*) as count FROM tickets WHERE status NOT IN ('concluido', 'cancelado') GROUP BY priority").all(),
-      ticketsMonthly: db.prepare(`
-        SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as total,
-          SUM(CASE WHEN status = 'concluido' THEN 1 ELSE 0 END) as concluidos
-        FROM tickets GROUP BY strftime('%Y-%m', created_at) ORDER BY month DESC LIMIT 6
-      `).all().reverse(),
-      topClients: db.prepare(`
-        SELECT c.name, c.company, COUNT(t.id) as ticket_count
-        FROM clients c LEFT JOIN tickets t ON t.client_id = c.id
-        GROUP BY c.id ORDER BY ticket_count DESC LIMIT 5
-      `).all(),
-      technicianPerformance: db.prepare(`
-        SELECT u.name,
-          COUNT(t.id) as total,
-          SUM(CASE WHEN t.status = 'concluido' THEN 1 ELSE 0 END) as concluidos,
-          SUM(CASE WHEN t.status IN ('em_andamento', 'aberto') THEN 1 ELSE 0 END) as pendentes
-        FROM users u LEFT JOIN tickets t ON t.assigned_to = u.id
-        WHERE u.role = 'tecnico' AND u.active = 1
-        GROUP BY u.id ORDER BY total DESC
-      `).all()
-    },
-    recentTickets: db.prepare(`
-      SELECT t.id, t.ticket_number, t.title, t.status, t.priority, t.created_at,
-        c.name as client_name, u.name as assigned_name
-      FROM tickets t
-      LEFT JOIN clients c ON t.client_id = c.id
-      LEFT JOIN users u ON t.assigned_to = u.id
-      ORDER BY t.created_at DESC LIMIT 10
-    `).all(),
-    recentOrders: db.prepare(`
-      SELECT so.id, so.order_number, so.status, so.cost_total, so.created_at,
-        u.name as technician_name, c.name as client_name
-      FROM service_orders so
-      LEFT JOIN users u ON so.technician_id = u.id
-      LEFT JOIN clients c ON so.client_id = c.id
-      ORDER BY so.created_at DESC LIMIT 5
-    `).all()
-  };
+router.get('/', authMiddleware, async (req, res) => {
+  try {
+    // Fetch all data in parallel
+    const [
+      { data: allTickets },
+      { data: allOrders },
+      { count: clientCount },
+      { data: allEquipment },
+      { data: allTechnicians },
+    ] = await Promise.all([
+      supabase.from('tickets').select('id, status, type, priority, created_at, assigned_to, client_id'),
+      supabase.from('service_orders').select('id, status, cost_total, created_at, technician_id, client_id'),
+      supabase.from('clients').select('*', { count: 'exact', head: true }).eq('active', true),
+      supabase.from('equipment').select('id, status'),
+      supabase.from('users').select('id, name, role, active').eq('role', 'tecnico').eq('active', true),
+    ]);
 
-  res.json(dashboard);
+    const tickets = allTickets || [];
+    const orders = allOrders || [];
+    const equipment = allEquipment || [];
+    const technicians = allTechnicians || [];
+
+    // Ticket stats
+    const ticketStats = {
+      total: tickets.length,
+      abertos: tickets.filter(t => t.status === 'aberto' || t.status === 'aprovado').length,
+      em_andamento: tickets.filter(t => t.status === 'em_andamento').length,
+      aguardando: tickets.filter(t => t.status === 'aguardando').length,
+      concluidos: tickets.filter(t => t.status === 'concluido').length,
+      cancelados: tickets.filter(t => t.status === 'cancelado').length,
+      urgentes: tickets.filter(t => t.priority === 'urgente' && !['concluido', 'cancelado'].includes(t.status)).length,
+    };
+
+    // Service order stats
+    const finalizadas = orders.filter(o => o.status === 'finalizada');
+    const orderStats = {
+      total: orders.length,
+      em_execucao: orders.filter(o => o.status === 'em_execucao').length,
+      finalizadas: finalizadas.length,
+      pendentes: orders.filter(o => o.status === 'pendente').length,
+      revenue: finalizadas.reduce((sum, o) => sum + (o.cost_total || 0), 0),
+    };
+
+    // Charts data
+    const byStatus = Object.entries(tickets.reduce((a, t) => { a[t.status] = (a[t.status] || 0) + 1; return a; }, {})).map(([status, count]) => ({ status, count }));
+    const byType = Object.entries(tickets.reduce((a, t) => { a[t.type] = (a[t.type] || 0) + 1; return a; }, {})).map(([type, count]) => ({ type, count }));
+    const byPriority = Object.entries(tickets.filter(t => !['concluido', 'cancelado'].includes(t.status)).reduce((a, t) => { a[t.priority] = (a[t.priority] || 0) + 1; return a; }, {})).map(([priority, count]) => ({ priority, count }));
+
+    const monthlyMap = tickets.reduce((a, t) => {
+      const m = t.created_at?.substring(0, 7);
+      if (m) {
+        if (!a[m]) a[m] = { total: 0, concluidos: 0 };
+        a[m].total++;
+        if (t.status === 'concluido') a[m].concluidos++;
+      }
+      return a;
+    }, {});
+    const ticketsMonthly = Object.entries(monthlyMap).map(([month, v]) => ({ month, ...v })).sort((a, b) => b.month.localeCompare(a.month)).slice(0, 6).reverse();
+
+    // Top clients
+    const clientTicketMap = tickets.reduce((a, t) => { if (t.client_id) a[t.client_id] = (a[t.client_id] || 0) + 1; return a; }, {});
+    const topClientIds = Object.entries(clientTicketMap).sort((a, b) => b[1] - a[1]).slice(0, 5).map(e => parseInt(e[0]));
+    let topClients = [];
+    if (topClientIds.length > 0) {
+      const { data: clientData } = await supabase.from('clients').select('id, name, company').in('id', topClientIds);
+      topClients = (clientData || []).map(c => ({
+        name: c.name, company: c.company, ticket_count: clientTicketMap[c.id] || 0,
+      })).sort((a, b) => b.ticket_count - a.ticket_count);
+    }
+
+    // Technician performance
+    const techPerformance = technicians.map(tech => {
+      const techTickets = tickets.filter(t => t.assigned_to === tech.id);
+      return {
+        name: tech.name,
+        total: techTickets.length,
+        concluidos: techTickets.filter(t => t.status === 'concluido').length,
+        pendentes: techTickets.filter(t => ['em_andamento', 'aberto'].includes(t.status)).length,
+      };
+    }).sort((a, b) => b.total - a.total);
+
+    // Recent tickets with joins
+    const { data: recentTickets } = await supabase.from('tickets').select(`
+      id, ticket_number, title, status, priority, created_at,
+      clients!tickets_client_id_fkey(name),
+      assigned:users!tickets_assigned_to_fkey(name)
+    `).order('created_at', { ascending: false }).limit(10);
+
+    const { data: recentOrders } = await supabase.from('service_orders').select(`
+      id, order_number, status, cost_total, created_at,
+      technician:users!service_orders_technician_id_fkey(name),
+      clients!service_orders_client_id_fkey(name)
+    `).order('created_at', { ascending: false }).limit(5);
+
+    const dashboard = {
+      tickets: ticketStats,
+      serviceOrders: orderStats,
+      clients: { total: clientCount || 0 },
+      equipment: {
+        total: equipment.length,
+        em_manutencao: equipment.filter(e => e.status === 'manutencao').length,
+      },
+      technicians: {
+        total: technicians.length,
+        with_tickets: new Set(tickets.filter(t => ['em_andamento', 'aberto', 'aprovado'].includes(t.status) && t.assigned_to).map(t => t.assigned_to)).size,
+      },
+      charts: {
+        ticketsByStatus: byStatus,
+        ticketsByType: byType,
+        ticketsByPriority: byPriority,
+        ticketsMonthly,
+        topClients,
+        technicianPerformance: techPerformance,
+      },
+      recentTickets: (recentTickets || []).map(t => ({
+        ...t, client_name: t.clients?.name, assigned_name: t.assigned?.name,
+      })),
+      recentOrders: (recentOrders || []).map(o => ({
+        ...o, technician_name: o.technician?.name, client_name: o.clients?.name,
+      })),
+    };
+
+    res.json(dashboard);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

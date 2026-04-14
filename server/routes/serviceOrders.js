@@ -1,163 +1,170 @@
 const express = require('express');
-const { db } = require('../db/database');
+const { supabase } = require('../db/database');
 const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 
-function generateOrderNumber() {
+async function generateOrderNumber() {
   const year = new Date().getFullYear();
-  const last = db.prepare("SELECT order_number FROM service_orders ORDER BY id DESC LIMIT 1").get();
+  const { data } = await supabase.from('service_orders').select('order_number').order('id', { ascending: false }).limit(1);
   let seq = 1;
-  if (last) {
-    const parts = last.order_number.split('-');
+  if (data && data.length > 0) {
+    const parts = data[0].order_number.split('-');
     seq = parseInt(parts[2]) + 1;
   }
   return `OS-${year}-${String(seq).padStart(4, '0')}`;
 }
 
-// List service orders
-router.get('/', authMiddleware, (req, res) => {
-  const { status, technician_id, client_id, search, page = 1, limit = 20 } = req.query;
-  let where = [];
-  let params = [];
+router.get('/', authMiddleware, async (req, res) => {
+  try {
+    const { status, technician_id, client_id, search, page = 1, limit = 20 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
 
-  if (status) { where.push('so.status = ?'); params.push(status); }
-  if (technician_id) { where.push('so.technician_id = ?'); params.push(technician_id); }
-  if (client_id) { where.push('so.client_id = ?'); params.push(client_id); }
-  if (search) {
-    where.push('(so.order_number LIKE ? OR so.diagnosis LIKE ? OR so.service_performed LIKE ?)');
-    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    let query = supabase.from('service_orders').select(`
+      *,
+      tickets!service_orders_ticket_id_fkey(ticket_number, title),
+      technician:users!service_orders_technician_id_fkey(name),
+      clients!service_orders_client_id_fkey(name, company),
+      equipment!service_orders_equipment_id_fkey(name)
+    `, { count: 'exact' });
+
+    if (status) query = query.eq('status', status);
+    if (technician_id) query = query.eq('technician_id', technician_id);
+    if (client_id) query = query.eq('client_id', client_id);
+    if (search) query = query.or(`order_number.ilike.%${search}%,diagnosis.ilike.%${search}%,service_performed.ilike.%${search}%`);
+    if (req.user.role === 'tecnico') query = query.eq('technician_id', req.user.id);
+
+    const { data, count } = await query.order('created_at', { ascending: false }).range(offset, offset + parseInt(limit) - 1);
+
+    const orders = (data || []).map(o => ({
+      ...o,
+      ticket_number: o.tickets?.ticket_number,
+      ticket_title: o.tickets?.title,
+      technician_name: o.technician?.name,
+      client_name: o.clients?.name,
+      client_company: o.clients?.company,
+      equipment_name: o.equipment?.name,
+    }));
+
+    res.json({ orders, total: count || 0, page: parseInt(page), totalPages: Math.ceil((count || 0) / parseInt(limit)) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  if (req.user.role === 'tecnico') {
-    where.push('so.technician_id = ?');
-    params.push(req.user.id);
-  }
-
-  const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-
-  const total = db.prepare(`SELECT COUNT(*) as count FROM service_orders so ${whereClause}`).get(...params).count;
-
-  const orders = db.prepare(`
-    SELECT so.*,
-      t.ticket_number, t.title as ticket_title,
-      u.name as technician_name,
-      c.name as client_name, c.company as client_company,
-      e.name as equipment_name
-    FROM service_orders so
-    LEFT JOIN tickets t ON so.ticket_id = t.id
-    LEFT JOIN users u ON so.technician_id = u.id
-    LEFT JOIN clients c ON so.client_id = c.id
-    LEFT JOIN equipment e ON so.equipment_id = e.id
-    ${whereClause}
-    ORDER BY so.created_at DESC
-    LIMIT ? OFFSET ?
-  `).all(...params, parseInt(limit), offset);
-
-  res.json({ orders, total, page: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)) });
 });
 
-// Get stats
-router.get('/stats', authMiddleware, (req, res) => {
-  const stats = {
-    total: db.prepare('SELECT COUNT(*) as count FROM service_orders').get().count,
-    pendentes: db.prepare("SELECT COUNT(*) as count FROM service_orders WHERE status = 'pendente'").get().count,
-    em_execucao: db.prepare("SELECT COUNT(*) as count FROM service_orders WHERE status = 'em_execucao'").get().count,
-    finalizadas: db.prepare("SELECT COUNT(*) as count FROM service_orders WHERE status = 'finalizada'").get().count,
-    revenue: db.prepare("SELECT COALESCE(SUM(cost_total), 0) as total FROM service_orders WHERE status = 'finalizada'").get().total,
-    avg_time: db.prepare(`
-      SELECT AVG((julianday(end_time) - julianday(start_time)) * 24) as hours
-      FROM service_orders WHERE status = 'finalizada' AND start_time IS NOT NULL AND end_time IS NOT NULL
-    `).get().hours
-  };
-  res.json(stats);
+router.get('/stats', authMiddleware, async (req, res) => {
+  try {
+    const { data: all } = await supabase.from('service_orders').select('status, cost_total, start_time, end_time');
+    const rows = all || [];
+    const finalizadas = rows.filter(r => r.status === 'finalizada');
+
+    let totalHours = 0;
+    let countWithTime = 0;
+    finalizadas.forEach(r => {
+      if (r.start_time && r.end_time) {
+        totalHours += (new Date(r.end_time) - new Date(r.start_time)) / 3600000;
+        countWithTime++;
+      }
+    });
+
+    res.json({
+      total: rows.length,
+      pendentes: rows.filter(r => r.status === 'pendente').length,
+      em_execucao: rows.filter(r => r.status === 'em_execucao').length,
+      finalizadas: finalizadas.length,
+      revenue: finalizadas.reduce((sum, r) => sum + (r.cost_total || 0), 0),
+      avg_time: countWithTime > 0 ? totalHours / countWithTime : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Get single service order
-router.get('/:id', authMiddleware, (req, res) => {
-  const order = db.prepare(`
-    SELECT so.*,
-      t.ticket_number, t.title as ticket_title, t.description as ticket_description,
-      u.name as technician_name, u.phone as technician_phone,
-      c.name as client_name, c.company as client_company, c.phone as client_phone, c.email as client_email, c.address as client_address,
-      e.name as equipment_name, e.model as equipment_model, e.serial_number as equipment_serial
-    FROM service_orders so
-    LEFT JOIN tickets t ON so.ticket_id = t.id
-    LEFT JOIN users u ON so.technician_id = u.id
-    LEFT JOIN clients c ON so.client_id = c.id
-    LEFT JOIN equipment e ON so.equipment_id = e.id
-    WHERE so.id = ?
-  `).get(req.params.id);
+router.get('/:id', authMiddleware, async (req, res) => {
+  try {
+    const { data: order } = await supabase.from('service_orders').select(`
+      *,
+      tickets!service_orders_ticket_id_fkey(ticket_number, title, description),
+      technician:users!service_orders_technician_id_fkey(name, phone),
+      clients!service_orders_client_id_fkey(name, company, phone, email, address),
+      equipment!service_orders_equipment_id_fkey(name, model, serial_number)
+    `).eq('id', req.params.id).single();
 
-  if (!order) {
-    return res.status(404).json({ error: 'Ordem de serviço não encontrada' });
+    if (!order) return res.status(404).json({ error: 'Ordem de serviço não encontrada' });
+
+    res.json({
+      ...order,
+      ticket_number: order.tickets?.ticket_number,
+      ticket_title: order.tickets?.title,
+      ticket_description: order.tickets?.description,
+      technician_name: order.technician?.name,
+      technician_phone: order.technician?.phone,
+      client_name: order.clients?.name,
+      client_company: order.clients?.company,
+      client_phone: order.clients?.phone,
+      client_email: order.clients?.email,
+      client_address: order.clients?.address,
+      equipment_name: order.equipment?.name,
+      equipment_model: order.equipment?.model,
+      equipment_serial: order.equipment?.serial_number,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  res.json(order);
 });
 
-// Create service order
-router.post('/', authMiddleware, (req, res) => {
-  const { ticket_id, technician_id, client_id, equipment_id, diagnosis, service_performed, materials_used, observations, cost_labor, cost_materials } = req.body;
+router.post('/', authMiddleware, async (req, res) => {
+  try {
+    const { ticket_id, technician_id, client_id, equipment_id, diagnosis, service_performed, materials_used, observations, cost_labor, cost_materials } = req.body;
+    const order_number = await generateOrderNumber();
+    const cost_total = (parseFloat(cost_labor) || 0) + (parseFloat(cost_materials) || 0);
 
-  const order_number = generateOrderNumber();
-  const cost_total = (parseFloat(cost_labor) || 0) + (parseFloat(cost_materials) || 0);
+    const { data: order } = await supabase.from('service_orders').insert({
+      order_number, ticket_id: ticket_id || null, technician_id: technician_id || req.user.id,
+      client_id: client_id || null, equipment_id: equipment_id || null,
+      diagnosis, service_performed, materials_used, observations,
+      cost_labor: cost_labor || 0, cost_materials: cost_materials || 0, cost_total
+    }).select().single();
 
-  const result = db.prepare(`
-    INSERT INTO service_orders (order_number, ticket_id, technician_id, client_id, equipment_id, diagnosis, service_performed, materials_used, observations, cost_labor, cost_materials, cost_total)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(order_number, ticket_id || null, technician_id || req.user.id, client_id || null, equipment_id || null, diagnosis, service_performed, materials_used, observations, cost_labor || 0, cost_materials || 0, cost_total);
+    if (ticket_id) {
+      await supabase.from('tickets').update({ status: 'em_andamento', updated_at: new Date().toISOString() }).eq('id', ticket_id);
+    }
 
-  // Update ticket status if linked
-  if (ticket_id) {
-    db.prepare("UPDATE tickets SET status = 'em_andamento', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(ticket_id);
+    res.status(201).json(order);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const order = db.prepare('SELECT * FROM service_orders WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(order);
 });
 
-// Update service order
-router.put('/:id', authMiddleware, (req, res) => {
-  const order = db.prepare('SELECT * FROM service_orders WHERE id = ?').get(req.params.id);
-  if (!order) {
-    return res.status(404).json({ error: 'Ordem de serviço não encontrada' });
+router.put('/:id', authMiddleware, async (req, res) => {
+  try {
+    const { data: order } = await supabase.from('service_orders').select('*').eq('id', req.params.id).single();
+    if (!order) return res.status(404).json({ error: 'Ordem de serviço não encontrada' });
+
+    const { status, start_time, end_time, diagnosis, service_performed, materials_used, observations, client_signature, technician_signature, cost_labor, cost_materials, latitude, longitude } = req.body;
+    const cost_total = (parseFloat(cost_labor ?? order.cost_labor) || 0) + (parseFloat(cost_materials ?? order.cost_materials) || 0);
+
+    const { data: updated } = await supabase.from('service_orders').update({
+      status: status || order.status, start_time: start_time ?? order.start_time, end_time: end_time ?? order.end_time,
+      diagnosis: diagnosis ?? order.diagnosis, service_performed: service_performed ?? order.service_performed,
+      materials_used: materials_used ?? order.materials_used, observations: observations ?? order.observations,
+      client_signature: client_signature ?? order.client_signature, technician_signature: technician_signature ?? order.technician_signature,
+      cost_labor: cost_labor ?? order.cost_labor, cost_materials: cost_materials ?? order.cost_materials, cost_total,
+      latitude: latitude ?? order.latitude, longitude: longitude ?? order.longitude, updated_at: new Date().toISOString()
+    }).eq('id', req.params.id).select().single();
+
+    if (status === 'finalizada' && order.ticket_id) {
+      await supabase.from('tickets').update({ status: 'concluido', completed_date: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', order.ticket_id);
+    }
+
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const { status, start_time, end_time, diagnosis, service_performed, materials_used, observations, client_signature, technician_signature, cost_labor, cost_materials, latitude, longitude } = req.body;
-
-  const cost_total = (parseFloat(cost_labor ?? order.cost_labor) || 0) + (parseFloat(cost_materials ?? order.cost_materials) || 0);
-
-  db.prepare(`
-    UPDATE service_orders SET
-      status = ?, start_time = ?, end_time = ?, diagnosis = ?,
-      service_performed = ?, materials_used = ?, observations = ?,
-      client_signature = ?, technician_signature = ?,
-      cost_labor = ?, cost_materials = ?, cost_total = ?,
-      latitude = ?, longitude = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(
-    status || order.status, start_time ?? order.start_time, end_time ?? order.end_time,
-    diagnosis ?? order.diagnosis, service_performed ?? order.service_performed,
-    materials_used ?? order.materials_used, observations ?? order.observations,
-    client_signature ?? order.client_signature, technician_signature ?? order.technician_signature,
-    cost_labor ?? order.cost_labor, cost_materials ?? order.cost_materials, cost_total,
-    latitude ?? order.latitude, longitude ?? order.longitude, req.params.id
-  );
-
-  // Update ticket status when service order is completed
-  if (status === 'finalizada' && order.ticket_id) {
-    db.prepare("UPDATE tickets SET status = 'concluido', completed_date = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(order.ticket_id);
-  }
-
-  const updated = db.prepare('SELECT * FROM service_orders WHERE id = ?').get(req.params.id);
-  res.json(updated);
 });
 
-// Delete service order
-router.delete('/:id', authMiddleware, (req, res) => {
-  db.prepare('DELETE FROM service_orders WHERE id = ?').run(req.params.id);
+router.delete('/:id', authMiddleware, async (req, res) => {
+  await supabase.from('service_orders').delete().eq('id', req.params.id);
   res.json({ message: 'Ordem de serviço excluída' });
 });
 

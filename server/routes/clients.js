@@ -1,77 +1,93 @@
 const express = require('express');
-const { db } = require('../db/database');
+const { supabase } = require('../db/database');
 const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.get('/', authMiddleware, (req, res) => {
-  const { search, page = 1, limit = 50 } = req.query;
-  let where = ['active = 1'];
-  let params = [];
+router.get('/', authMiddleware, async (req, res) => {
+  try {
+    const { search, page = 1, limit = 50 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
 
-  if (search) {
-    where.push('(name LIKE ? OR company LIKE ? OR email LIKE ? OR document LIKE ?)');
-    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    let query = supabase.from('clients').select('*', { count: 'exact' }).eq('active', true);
+
+    if (search) {
+      query = query.or(`name.ilike.%${search}%,company.ilike.%${search}%,email.ilike.%${search}%,document.ilike.%${search}%`);
+    }
+
+    const { data: clients, count } = await query.order('name').range(offset, offset + parseInt(limit) - 1);
+
+    // Get ticket and equipment counts for each client
+    const enriched = await Promise.all((clients || []).map(async (c) => {
+      const { count: ticket_count } = await supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('client_id', c.id);
+      const { count: equipment_count } = await supabase.from('equipment').select('*', { count: 'exact', head: true }).eq('client_id', c.id);
+      return { ...c, ticket_count: ticket_count || 0, equipment_count: equipment_count || 0 };
+    }));
+
+    res.json({ clients: enriched, total: count || 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const whereClause = 'WHERE ' + where.join(' AND ');
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-
-  const total = db.prepare(`SELECT COUNT(*) as count FROM clients ${whereClause}`).get(...params).count;
-  const clients = db.prepare(`
-    SELECT c.*,
-      (SELECT COUNT(*) FROM tickets WHERE client_id = c.id) as ticket_count,
-      (SELECT COUNT(*) FROM equipment WHERE client_id = c.id) as equipment_count
-    FROM clients c ${whereClause} ORDER BY c.name ASC LIMIT ? OFFSET ?
-  `).all(...params, parseInt(limit), offset);
-
-  res.json({ clients, total });
 });
 
-router.get('/:id', authMiddleware, (req, res) => {
-  const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(req.params.id);
-  if (!client) return res.status(404).json({ error: 'Cliente não encontrado' });
+router.get('/:id', authMiddleware, async (req, res) => {
+  try {
+    const { data: client } = await supabase.from('clients').select('*').eq('id', req.params.id).single();
+    if (!client) return res.status(404).json({ error: 'Cliente não encontrado' });
 
-  const tickets = db.prepare(`
-    SELECT t.*, u.name as assigned_name FROM tickets t
-    LEFT JOIN users u ON t.assigned_to = u.id
-    WHERE t.client_id = ? ORDER BY t.created_at DESC
-  `).all(req.params.id);
+    const { data: tickets } = await supabase.from('tickets').select(`
+      *, assigned:users!tickets_assigned_to_fkey(name)
+    `).eq('client_id', req.params.id).order('created_at', { ascending: false });
 
-  const equipments = db.prepare('SELECT * FROM equipment WHERE client_id = ?').all(req.params.id);
+    const { data: equipments } = await supabase.from('equipment').select('*').eq('client_id', req.params.id);
 
-  res.json({ ...client, tickets, equipments });
+    const ticketsMapped = (tickets || []).map(t => ({ ...t, assigned_name: t.assigned?.name }));
+
+    res.json({ ...client, tickets: ticketsMapped, equipments: equipments || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.post('/', authMiddleware, (req, res) => {
-  const { name, email, phone, document, company, address, city, state, zip_code, notes } = req.body;
-  if (!name) return res.status(400).json({ error: 'Nome é obrigatório' });
+router.post('/', authMiddleware, async (req, res) => {
+  try {
+    const { name, email, phone, document, company, address, city, state, zip_code, notes } = req.body;
+    if (!name) return res.status(400).json({ error: 'Nome é obrigatório' });
 
-  const result = db.prepare(`
-    INSERT INTO clients (name, email, phone, document, company, address, city, state, zip_code, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(name, email, phone, document, company, address, city, state, zip_code, notes);
+    const { data: client, error } = await supabase.from('clients').insert({
+      name, email, phone, document, company, address, city, state, zip_code, notes
+    }).select().single();
 
-  const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(client);
+    if (error) throw error;
+    res.status(201).json(client);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.put('/:id', authMiddleware, (req, res) => {
-  const { name, email, phone, document, company, address, city, state, zip_code, notes } = req.body;
+router.put('/:id', authMiddleware, async (req, res) => {
+  try {
+    const { name, email, phone, document, company, address, city, state, zip_code, notes } = req.body;
 
-  db.prepare(`
-    UPDATE clients SET name = ?, email = ?, phone = ?, document = ?, company = ?,
-    address = ?, city = ?, state = ?, zip_code = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(name, email, phone, document, company, address, city, state, zip_code, notes, req.params.id);
+    const { data: client, error } = await supabase.from('clients').update({
+      name, email, phone, document, company, address, city, state, zip_code, notes,
+      updated_at: new Date().toISOString()
+    }).eq('id', req.params.id).select().single();
 
-  const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(req.params.id);
-  res.json(client);
+    if (error) throw error;
+    res.json(client);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.delete('/:id', authMiddleware, (req, res) => {
-  db.prepare('UPDATE clients SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Cliente desativado' });
+router.delete('/:id', authMiddleware, async (req, res) => {
+  try {
+    await supabase.from('clients').update({ active: false, updated_at: new Date().toISOString() }).eq('id', req.params.id);
+    res.json({ message: 'Cliente desativado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
