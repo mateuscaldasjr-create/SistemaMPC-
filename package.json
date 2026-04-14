@@ -1,15 +1,16 @@
 {
   "name": "sistema-mpc-produttivo",
   "version": "1.0.0",
-  "description": "Sistema de Chamados e Ordens de Serviço - Estilo Produttivo",
+  "description": "MPC Service - Sistema de Chamados e Ordens de Serviço by MPC AI Solutions",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
     "dev:server": "node server/index.js",
     "dev:client": "cd client && npx react-scripts start",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "build": "cd client && npx react-scripts build",
-    "install:all": "npm install && cd client && npm install"
+    "build": "cd client && npm install && npx react-scripts build",
+    "install:all": "npm install && cd client && npm install",
+    "vercel-build": "cd client && npm install && npm run build"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
