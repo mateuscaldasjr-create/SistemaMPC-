@@ -3,17 +3,34 @@ try { require('dotenv').config(); } catch(e) {}
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'sistema-mpc-produttivo-secret-key-2024';
 process.env.NODE_ENV = 'production';
 
-const app = require('../server/app');
+let app;
+let loadError = null;
 
-// Health check para debug
-const express = require('express');
-app.get('/api/health', (req, res) => {
-  res.json({
-    ok: true,
-    hasSupabaseUrl: !!process.env.SUPABASE_URL,
-    hasSupabaseKey: !!process.env.SUPABASE_SERVICE_KEY,
-    hasJwtSecret: !!process.env.JWT_SECRET,
+try {
+  app = require('../server/app');
+
+  // Health check
+  app.get('/api/health', (req, res) => {
+    res.json({
+      ok: true,
+      hasSupabaseUrl: !!process.env.SUPABASE_URL,
+      hasSupabaseKey: !!process.env.SUPABASE_SERVICE_KEY,
+      hasJwtSecret: !!process.env.JWT_SECRET,
+      nodeVersion: process.version,
+    });
   });
-});
+} catch (err) {
+  loadError = err;
+  // Criar app mínimo para retornar erro útil
+  const express = require('express');
+  app = express();
+  app.use((req, res) => {
+    res.status(500).json({
+      error: 'Erro ao inicializar servidor',
+      message: loadError.message,
+      stack: loadError.stack,
+    });
+  });
+}
 
 module.exports = app;

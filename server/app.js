@@ -19,6 +19,12 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/schedules', require('./routes/schedules'));
 
+// Error handler global para API
+app.use('/api', (err, req, res, _next) => {
+  console.error('API Error:', err);
+  res.status(500).json({ error: err.message || 'Erro interno do servidor' });
+});
+
 // Servir frontend em produção (apenas fora da Vercel)
 if (process.env.VERCEL !== '1') {
   app.use(express.static(path.join(__dirname, '..', 'client', 'build')));
