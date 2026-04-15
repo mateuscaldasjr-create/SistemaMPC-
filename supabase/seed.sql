@@ -6,13 +6,13 @@
 
 -- Admin (senha: admin123 - bcrypt hash)
 INSERT INTO users (name, email, password, role, phone) VALUES
-('Administrador', 'admin@sistemampc.com', '$2a$10$8K1p/a0dL1LXMIgoEDFrwOfMQkf9XrKz5Gh1VDC3G3sSYjGFGhk2y', 'admin', '(11) 99999-9999');
+('Administrador', 'admin@sistemampc.com', '$2a$10$o2gdTv0EsZgf0guQx9z8rOdLOIZqq.eo69jGDYtOThybb4Q313kGG', 'admin', '(11) 99999-9999');
 
 -- Técnicos (senha: tech123)
 INSERT INTO users (name, email, password, role, phone) VALUES
-('Roberto Técnico', 'roberto@sistemampc.com', '$2a$10$YQiKlKOMgVGFa1GjfSy0/.XqFVkGZCdNfnJHGJsHqOPwBqeZUzm/O', 'tecnico', '(11) 91234-5678'),
-('Fernanda Técnica', 'fernanda@sistemampc.com', '$2a$10$YQiKlKOMgVGFa1GjfSy0/.XqFVkGZCdNfnJHGJsHqOPwBqeZUzm/O', 'tecnico', '(11) 92345-6789'),
-('Lucas Gestor', 'lucas@sistemampc.com', '$2a$10$YQiKlKOMgVGFa1GjfSy0/.XqFVkGZCdNfnJHGJsHqOPwBqeZUzm/O', 'gestor', '(11) 93456-7890');
+('Roberto Técnico', 'roberto@sistemampc.com', '$2a$10$3lEzbjpumZXiD7FdsFrU1eJa0bY10avu6.T1MsSkoUwvmhf3vYZYG', 'tecnico', '(11) 91234-5678'),
+('Fernanda Técnica', 'fernanda@sistemampc.com', '$2a$10$3lEzbjpumZXiD7FdsFrU1eJa0bY10avu6.T1MsSkoUwvmhf3vYZYG', 'tecnico', '(11) 92345-6789'),
+('Lucas Gestor', 'lucas@sistemampc.com', '$2a$10$3lEzbjpumZXiD7FdsFrU1eJa0bY10avu6.T1MsSkoUwvmhf3vYZYG', 'gestor', '(11) 93456-7890');
 
 -- Clientes
 INSERT INTO clients (name, email, phone, document, company, address, city, state) VALUES
