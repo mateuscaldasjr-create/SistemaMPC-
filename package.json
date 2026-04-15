@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "MPC Service - Sistema de Chamados e Ordens de Serviço by MPC AI Solutions",
   "main": "server/index.js",
+  "engines": {
+    "node": "18.x"
+  },
   "scripts": {
     "start": "node server/index.js",
     "dev:server": "node server/index.js",
@@ -13,8 +16,8 @@
     "vercel-build": "cd client && npm install && npm run build"
   },
   "dependencies": {
-    "bcryptjs": "^2.4.3",
     "@supabase/supabase-js": "^2.39.0",
+    "bcryptjs": "^2.4.3",
     "concurrently": "^8.2.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
