@@ -1,46 +1,47 @@
 /* ============================================
-   SistemaMPC - Tema Produttivo
-   Cores: Azul #1a73e8, Verde #00c853
+   MPC Service - Design System Profissional
    ============================================ */
 
 :root {
-  --primary: #1a73e8;
-  --primary-dark: #1557b0;
-  --primary-light: #e8f0fe;
-  --secondary: #00c853;
-  --secondary-dark: #009624;
-  --accent: #ff6d00;
-  --danger: #ef4444;
-  --warning: #f59e0b;
-  --success: #10b981;
-  --info: #3b82f6;
+  --primary: #0066FF;
+  --primary-dark: #0052CC;
+  --primary-light: #EBF2FF;
+  --secondary: #00C48C;
+  --secondary-dark: #00A876;
+  --accent: #FF6B35;
+  --danger: #FF3B3B;
+  --warning: #FFB800;
+  --success: #00C48C;
+  --info: #0066FF;
 
-  --bg-main: #f0f2f5;
+  --bg-main: #F5F7FB;
   --bg-card: #ffffff;
-  --bg-sidebar: #1e293b;
-  --bg-sidebar-hover: #334155;
-  --bg-sidebar-active: #1a73e8;
+  --bg-sidebar: linear-gradient(180deg, #0F1629 0%, #1A2332 100%);
+  --bg-sidebar-flat: #0F1629;
+  --bg-sidebar-hover: rgba(255,255,255,0.08);
+  --bg-sidebar-active: rgba(0,102,255,0.2);
 
-  --text-primary: #1e293b;
-  --text-secondary: #64748b;
-  --text-light: #94a3b8;
+  --text-primary: #1A1F36;
+  --text-secondary: #6B7A99;
+  --text-light: #8F9BB7;
   --text-white: #ffffff;
 
-  --border: #e2e8f0;
-  --border-light: #f1f5f9;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-  --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
-  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+  --border: #E4E9F2;
+  --border-light: #F0F3F9;
+  --shadow-sm: 0 1px 3px rgba(16,24,64,0.04);
+  --shadow: 0 2px 8px rgba(16,24,64,0.08);
+  --shadow-md: 0 4px 16px rgba(16,24,64,0.1);
+  --shadow-lg: 0 8px 32px rgba(16,24,64,0.12);
+  --shadow-primary: 0 4px 16px rgba(0,102,255,0.3);
 
-  --radius-sm: 6px;
-  --radius: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-sm: 8px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
 
-  --sidebar-width: 260px;
+  --sidebar-width: 264px;
   --header-height: 64px;
-  --transition: all 0.2s ease;
+  --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 * {
@@ -103,7 +104,7 @@ a { text-decoration: none; color: inherit; }
 
 .sidebar {
   width: var(--sidebar-width);
-  background: var(--bg-sidebar);
+  background: linear-gradient(180deg, #0F1629 0%, #1A2332 100%);
   color: var(--text-white);
   position: fixed;
   top: 0;
