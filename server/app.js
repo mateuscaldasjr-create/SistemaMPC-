@@ -19,10 +19,12 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/schedules', require('./routes/schedules'));
 
-// Servir frontend em produção
-app.use(express.static(path.join(__dirname, '..', 'client', 'build')));
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'client', 'build', 'index.html'));
-});
+// Servir frontend em produção (apenas fora da Vercel)
+if (process.env.VERCEL !== '1') {
+  app.use(express.static(path.join(__dirname, '..', 'client', 'build')));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'client', 'build', 'index.html'));
+  });
+}
 
 module.exports = app;
