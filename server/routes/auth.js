@@ -33,7 +33,7 @@ router.post('/login', async (req, res) => {
     const { password: _, ...userWithoutPassword } = user;
     res.json({ token, user: userWithoutPassword });
   } catch (err) {
-    res.status(500).json({ error: 'Erro interno' });
+    res.status(500).json({ error: 'Erro no login: ' + err.message });
   }
 });
 
