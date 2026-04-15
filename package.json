@@ -4,7 +4,7 @@
   "description": "MPC Service - Sistema de Chamados e Ordens de Serviço by MPC AI Solutions",
   "main": "server/index.js",
   "engines": {
-    "node": "18.x"
+    "node": "24.x"
   },
   "scripts": {
     "start": "node server/index.js",
