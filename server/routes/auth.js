@@ -25,7 +25,7 @@ router.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user.id, name: user.name, email: user.email, role: user.role },
+      { id: user.id, name: user.name, email: user.email, role: user.role, client_id: user.client_id || null },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -39,7 +39,7 @@ router.post('/login', async (req, res) => {
 
 router.get('/me', authMiddleware, async (req, res) => {
   const { data: user } = await supabase
-    .from('users').select('id, name, email, role, phone, avatar, active, created_at')
+    .from('users').select('id, name, email, role, phone, avatar, active, client_id, created_at')
     .eq('id', req.user.id).single();
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
   res.json(user);

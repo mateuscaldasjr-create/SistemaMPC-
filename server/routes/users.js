@@ -9,7 +9,7 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const { role, search, active } = req.query;
 
-    let query = supabase.from('users').select('id, name, email, role, phone, active, created_at');
+    let query = supabase.from('users').select('id, name, email, role, phone, active, client_id, created_at');
 
     if (role) query = query.eq('role', role);
     if (active !== undefined) query = query.eq('active', active === 'true' || active === '1');
@@ -67,7 +67,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
 
 router.post('/', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { name, email, password, role, phone } = req.body;
+    const { name, email, password, role, phone, client_id } = req.body;
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
     }
@@ -79,8 +79,9 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
 
     const hashedPassword = bcrypt.hashSync(password, 10);
     const { data: user, error } = await supabase.from('users').insert({
-      name, email, password: hashedPassword, role: role || 'tecnico', phone
-    }).select('id, name, email, role, phone, active, created_at').single();
+      name, email, password: hashedPassword, role: role || 'tecnico', phone,
+      client_id: client_id || null
+    }).select('id, name, email, role, phone, active, client_id, created_at').single();
 
     if (error) throw error;
     res.status(201).json(user);
@@ -91,10 +92,11 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
 
 router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { name, email, role, phone, active, password } = req.body;
+    const { name, email, role, phone, active, password, client_id } = req.body;
 
     const updates = {
       name, email, role, phone, active: active ?? true,
+      client_id: client_id || null,
       updated_at: new Date().toISOString()
     };
 
@@ -104,7 +106,7 @@ router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
 
     const { data: user, error } = await supabase.from('users').update(updates)
       .eq('id', req.params.id)
-      .select('id, name, email, role, phone, active, created_at').single();
+      .select('id, name, email, role, phone, active, client_id, created_at').single();
 
     if (error) throw error;
     res.json(user);

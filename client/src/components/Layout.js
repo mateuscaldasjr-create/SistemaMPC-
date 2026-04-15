@@ -2,15 +2,17 @@ import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const menuItems = [
-  { path: '/', icon: 'dashboard', label: 'Dashboard' },
-  { path: '/chamados', icon: 'confirmation_number', label: 'Chamados', section: 'GESTÃO' },
-  { path: '/ordens', icon: 'assignment', label: 'Ordens de Serviço' },
-  { path: '/agenda', icon: 'calendar_today', label: 'Agenda' },
-  { path: '/clientes', icon: 'people', label: 'Clientes', section: 'CADASTROS' },
-  { path: '/equipamentos', icon: 'precision_manufacturing', label: 'Equipamentos' },
-  { path: '/tecnicos', icon: 'engineering', label: 'Técnicos' },
-  { path: '/relatorios', icon: 'bar_chart', label: 'Relatórios', section: 'ANÁLISE' },
+const allMenuItems = [
+  { path: '/', icon: 'dashboard', label: 'Dashboard', roles: ['admin', 'gestor', 'tecnico'] },
+  { path: '/meus-chamados', icon: 'dashboard', label: 'Meus Chamados', roles: ['cliente'] },
+  { path: '/chamados', icon: 'confirmation_number', label: 'Chamados', section: 'GESTÃO', roles: ['admin', 'gestor', 'tecnico'] },
+  { path: '/chamados/novo', icon: 'add_circle', label: 'Abrir Chamado', section: 'GESTÃO', roles: ['cliente'] },
+  { path: '/ordens', icon: 'assignment', label: 'Ordens de Serviço', roles: ['admin', 'gestor', 'tecnico'] },
+  { path: '/agenda', icon: 'calendar_today', label: 'Agenda', roles: ['admin', 'gestor', 'tecnico'] },
+  { path: '/clientes', icon: 'people', label: 'Clientes', section: 'CADASTROS', roles: ['admin', 'gestor'] },
+  { path: '/equipamentos', icon: 'precision_manufacturing', label: 'Equipamentos', roles: ['admin', 'gestor'] },
+  { path: '/tecnicos', icon: 'engineering', label: 'Usuários', section: 'ADMINISTRAÇÃO', roles: ['admin'] },
+  { path: '/relatorios', icon: 'bar_chart', label: 'Relatórios', section: 'ANÁLISE', roles: ['admin', 'gestor', 'cliente'] },
 ];
 
 export default function Layout({ children, title }) {
@@ -20,15 +22,42 @@ export default function Layout({ children, title }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const initials = user?.name?.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'U';
-
   const roleLabels = { admin: 'Administrador', gestor: 'Gestor', tecnico: 'Técnico', cliente: 'Cliente' };
+
+  const menuItems = allMenuItems.filter(item => item.roles.includes(user?.role));
+
+  // Mobile nav items based on role
+  const getMobileNav = () => {
+    if (user?.role === 'cliente') {
+      return [
+        { path: '/meus-chamados', icon: 'dashboard', label: 'Início' },
+        { path: '/chamados/novo', icon: 'add_circle', label: 'Abrir Chamado' },
+        { path: '/relatorios', icon: 'bar_chart', label: 'Relatórios' },
+      ];
+    }
+    if (user?.role === 'tecnico') {
+      return [
+        { path: '/', icon: 'dashboard', label: 'Início' },
+        { path: '/chamados', icon: 'confirmation_number', label: 'Chamados' },
+        { path: '/ordens', icon: 'assignment', label: 'O.S.' },
+        { path: '/agenda', icon: 'calendar_today', label: 'Agenda' },
+      ];
+    }
+    return [
+      { path: '/', icon: 'dashboard', label: 'Início' },
+      { path: '/chamados', icon: 'confirmation_number', label: 'Chamados' },
+      { path: '/chamados/novo', icon: 'add', label: '', fab: true },
+      { path: '/ordens', icon: 'assignment', label: 'O.S.' },
+      { path: '/clientes', icon: 'people', label: 'Clientes' },
+    ];
+  };
+
+  const mobileNav = getMobileNav();
 
   return (
     <div className="app-layout">
-      {/* Mobile overlay */}
       {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
 
-      {/* Sidebar */}
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
           <div className="logo-icon">M</div>
@@ -39,7 +68,7 @@ export default function Layout({ children, title }) {
         </div>
 
         <nav className="sidebar-nav">
-          {menuItems.map((item, idx) => (
+          {menuItems.map((item) => (
             <React.Fragment key={item.path}>
               {item.section && (
                 <div className="sidebar-section">
@@ -70,9 +99,7 @@ export default function Layout({ children, title }) {
         </div>
       </aside>
 
-      {/* Main */}
       <div className="main-content">
-        {/* Header */}
         <header className="header">
           <div className="header-left">
             <button className="mobile-menu-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>
@@ -92,27 +119,17 @@ export default function Layout({ children, title }) {
           {children}
         </div>
 
-        {/* Mobile Bottom Navigation */}
         <nav className="mobile-bottom-nav">
-          <Link to="/" className={`mobile-nav-item ${location.pathname === '/' ? 'active' : ''}`}>
-            <span className="icon">dashboard</span>
-            <span>Início</span>
-          </Link>
-          <Link to="/chamados" className={`mobile-nav-item ${location.pathname.startsWith('/chamados') ? 'active' : ''}`}>
-            <span className="icon">confirmation_number</span>
-            <span>Chamados</span>
-          </Link>
-          <Link to="/chamados/novo" className="mobile-nav-item mobile-nav-fab">
-            <span className="icon">add</span>
-          </Link>
-          <Link to="/ordens" className={`mobile-nav-item ${location.pathname.startsWith('/ordens') ? 'active' : ''}`}>
-            <span className="icon">assignment</span>
-            <span>O.S.</span>
-          </Link>
-          <Link to="/clientes" className={`mobile-nav-item ${location.pathname.startsWith('/clientes') ? 'active' : ''}`}>
-            <span className="icon">people</span>
-            <span>Clientes</span>
-          </Link>
+          {mobileNav.map(item => (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={`mobile-nav-item ${item.fab ? 'mobile-nav-fab' : ''} ${location.pathname === item.path ? 'active' : ''}`}
+            >
+              <span className="icon">{item.icon}</span>
+              {item.label && <span>{item.label}</span>}
+            </Link>
+          ))}
         </nav>
       </div>
     </div>

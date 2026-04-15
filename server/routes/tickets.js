@@ -39,6 +39,9 @@ router.get('/', authMiddleware, async (req, res) => {
     if (req.user.role === 'tecnico') {
       query = query.eq('assigned_to', req.user.id);
     }
+    if (req.user.role === 'cliente' && req.user.client_id) {
+      query = query.eq('client_id', req.user.client_id);
+    }
 
     const { data, count, error } = await query
       .order('created_at', { ascending: false })
