@@ -18,7 +18,9 @@ export default function Login() {
       await login(email, password);
       navigate('/');
     } catch (err) {
-      setError(err.message || 'Erro ao fazer login');
+      setError(err.message || 'Erro ao fazer login. Verifique suas credenciais.');
+      setLoading(false);
+      return;
     }
     setLoading(false);
   };
