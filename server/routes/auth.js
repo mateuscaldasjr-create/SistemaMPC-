@@ -38,11 +38,16 @@ router.post('/login', async (req, res) => {
 });
 
 router.get('/me', authMiddleware, async (req, res) => {
-  const { data: user } = await supabase
-    .from('users').select('id, name, email, role, phone, avatar, active, client_id, created_at')
-    .eq('id', req.user.id).single();
-  if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
-  res.json(user);
+  try {
+    const { data: user } = await supabase
+      .from('users').select('*')
+      .eq('id', req.user.id).single();
+    if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
+    const { password: _, ...safe } = user;
+    res.json(safe);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.put('/profile', authMiddleware, async (req, res) => {

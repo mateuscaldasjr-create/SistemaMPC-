@@ -5,9 +5,14 @@ async function request(endpoint, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...options.headers };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+  } catch (err) {
+    throw new Error('Erro de conexão com o servidor. Verifique sua internet.');
+  }
 
-  const data = await response.json().catch(() => ({}));
+  const data = await response.json().catch(() => ({ error: `Erro ${response.status}: ${response.statusText}` }));
 
   if (response.status === 401 && !endpoint.includes('/auth/login')) {
     localStorage.removeItem('token');

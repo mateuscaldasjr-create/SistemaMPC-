@@ -9,7 +9,7 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const { role, search, active } = req.query;
 
-    let query = supabase.from('users').select('id, name, email, role, phone, active, client_id, created_at');
+    let query = supabase.from('users').select('*');
 
     if (role) query = query.eq('role', role);
     if (active !== undefined) query = query.eq('active', active === 'true' || active === '1');
