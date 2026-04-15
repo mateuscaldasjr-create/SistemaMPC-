@@ -24,11 +24,13 @@ try {
   // Criar app mínimo para retornar erro útil
   const express = require('express');
   app = express();
+  app.use(express.json());
   app.use((req, res) => {
     res.status(500).json({
-      error: 'Erro ao inicializar servidor',
-      message: loadError.message,
-      stack: loadError.stack,
+      error: 'Erro ao inicializar servidor: ' + loadError.message,
+      details: loadError.stack,
+      hasSupabaseUrl: !!process.env.SUPABASE_URL,
+      hasSupabaseKey: !!process.env.SUPABASE_SERVICE_KEY,
     });
   });
 }
