@@ -1400,6 +1400,7 @@ a { text-decoration: none; color: inherit; }
 
   body {
     -webkit-text-size-adjust: 100%;
+    font-size: 16px;
   }
 
   .sidebar {
@@ -1418,11 +1419,11 @@ a { text-decoration: none; color: inherit; }
 
   .header {
     left: 0;
-    padding: 0 12px;
+    padding: 0 16px;
     height: var(--header-height);
   }
 
-  .header-left h2 { font-size: 16px; }
+  .header-left h2 { font-size: 18px; }
 
   .page-content {
     padding: 16px;
@@ -1435,30 +1436,138 @@ a { text-decoration: none; color: inherit; }
     align-items: center;
   }
 
+  .mobile-nav-item {
+    font-size: 11px;
+    padding: 8px 0;
+  }
+  .mobile-nav-item .icon { font-size: 24px; }
+
   /* Stats */
   .stats-grid { display: none; }
   .mobile-stats-scroll { display: flex; }
 
-  /* Quick actions */
+  /* Quick actions - BIG touch targets */
   .mobile-quick-actions { display: grid; }
+
+  .quick-action-btn {
+    padding: 16px;
+    gap: 12px;
+  }
+
+  .quick-action-btn .action-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .quick-action-btn .action-icon .icon {
+    font-size: 24px;
+  }
+
+  .quick-action-btn .action-text {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .quick-action-btn .action-sub {
+    font-size: 13px;
+  }
+
+  /* Mobile stat cards - BIGGER */
+  .mobile-stat-card {
+    padding: 20px 16px;
+    min-width: 130px;
+  }
+
+  .mobile-stat-card .stat-value {
+    font-size: 32px;
+    font-weight: 800;
+  }
+
+  .mobile-stat-card .stat-label {
+    font-size: 13px;
+    font-weight: 500;
+    margin-top: 4px;
+  }
 
   /* Table -> Cards */
   .table-container { display: none; }
   .mobile-card-list { display: flex; }
 
-  /* Charts */
+  /* Mobile ticket cards - BIGGER text */
+  .mobile-ticket-card {
+    padding: 16px 18px;
+  }
+
+  .mobile-ticket-card .card-top .ticket-id {
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .mobile-ticket-card .card-title {
+    font-size: 17px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .mobile-ticket-card .card-client {
+    font-size: 15px;
+    margin-bottom: 12px;
+  }
+
+  .mobile-ticket-card .card-client .icon { font-size: 16px; }
+
+  .mobile-ticket-card .card-bottom .badge {
+    font-size: 13px;
+    padding: 5px 12px;
+  }
+
+  .mobile-ticket-card .card-meta {
+    font-size: 13px;
+  }
+
+  .mobile-ticket-card .card-meta .icon { font-size: 16px; }
+
+  /* Charts - taller on mobile */
   .charts-grid { grid-template-columns: 1fr; }
+
+  .chart-card {
+    padding: 20px 16px;
+  }
+
+  .chart-card h3 {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 20px;
+  }
 
   /* Detail */
   .detail-grid { grid-template-columns: 1fr; }
+
+  .detail-field .label {
+    font-size: 13px;
+  }
+
+  .detail-field .value {
+    font-size: 16px;
+  }
 
   /* Forms */
   .form-row { grid-template-columns: 1fr; }
   .form-row-3 { grid-template-columns: 1fr; }
 
+  .form-group {
+    margin-bottom: 20px;
+  }
+
+  .form-label {
+    font-size: 15px;
+    margin-bottom: 8px;
+  }
+
   .form-input, .form-select, .form-textarea {
-    padding: 12px 14px;
+    padding: 14px 16px;
     font-size: 16px; /* Prevents iOS zoom */
+    border-radius: var(--radius);
   }
 
   /* Page header */
@@ -1468,9 +1577,47 @@ a { text-decoration: none; color: inherit; }
     align-items: flex-start;
   }
 
+  .page-header h1 {
+    font-size: 22px;
+  }
+
+  .page-header p {
+    font-size: 15px;
+  }
+
   .page-header .btn {
     width: 100%;
     justify-content: center;
+  }
+
+  /* Card headers bigger */
+  .card-header {
+    padding: 16px 18px;
+  }
+
+  .card-header h3 {
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .card-body {
+    padding: 18px;
+  }
+
+  /* Badges bigger */
+  .badge {
+    font-size: 13px;
+    padding: 5px 12px;
+  }
+
+  .badge .dot {
+    width: 8px;
+    height: 8px;
+  }
+
+  .badge-priority {
+    font-size: 12px;
+    padding: 4px 10px;
   }
 
   /* Modal fullscreen on mobile */
@@ -1490,19 +1637,32 @@ a { text-decoration: none; color: inherit; }
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   }
 
+  .modal-header h2 {
+    font-size: 20px;
+  }
+
+  .modal-body {
+    padding: 20px 18px;
+  }
+
   /* Filters */
   .filters-bar {
-    padding: 12px;
-    gap: 8px;
+    padding: 12px 16px;
+    gap: 10px;
   }
 
   .search-input { min-width: 100%; }
 
+  .search-input input {
+    padding: 12px 14px 12px 42px;
+    font-size: 16px;
+  }
+
   .filter-select {
     flex: 1;
     min-width: 0;
-    font-size: 12px;
-    padding: 8px 8px;
+    font-size: 14px;
+    padding: 10px 12px;
   }
 
   /* Tabs scrollable */
@@ -1514,27 +1674,34 @@ a { text-decoration: none; color: inherit; }
   .tabs::-webkit-scrollbar { display: none; }
 
   .tab {
-    padding: 10px 16px;
-    font-size: 13px;
+    padding: 12px 18px;
+    font-size: 15px;
     white-space: nowrap;
   }
 
   /* Buttons touch-friendly */
   .btn {
-    padding: 12px 20px;
-    font-size: 14px;
-    min-height: 44px;
+    padding: 14px 22px;
+    font-size: 16px;
+    min-height: 48px;
   }
 
+  .btn .icon { font-size: 20px; }
+
   .btn-sm {
-    padding: 10px 14px;
-    min-height: 40px;
+    padding: 10px 16px;
+    font-size: 14px;
+    min-height: 44px;
   }
 
   /* Login */
   .login-card {
     padding: 32px 24px;
     border-radius: var(--radius-lg);
+  }
+
+  .login-card .logo h1 {
+    font-size: 26px;
   }
 
   /* Public page */
@@ -1544,16 +1711,49 @@ a { text-decoration: none; color: inherit; }
 
   /* Stat card inside mobile */
   .stat-card {
-    padding: 14px;
+    padding: 16px;
   }
 
   .stat-card .stat-value {
-    font-size: 22px;
+    font-size: 26px;
+  }
+
+  .stat-card .stat-label {
+    font-size: 14px;
   }
 
   .stat-card .stat-icon {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
+  }
+
+  /* Empty state */
+  .empty-state {
+    padding: 40px 20px;
+  }
+
+  .empty-state h3 {
+    font-size: 20px;
+  }
+
+  .empty-state p {
+    font-size: 15px;
+  }
+
+  /* Pagination bigger */
+  .pagination button {
+    width: 44px;
+    height: 44px;
+    font-size: 16px;
+  }
+
+  /* Timeline */
+  .timeline-item .content {
+    font-size: 15px;
+  }
+
+  .timeline-item .time {
+    font-size: 13px;
   }
 }
 
@@ -1567,6 +1767,16 @@ a { text-decoration: none; color: inherit; }
   .page-content { padding: 12px; }
   .stats-grid { grid-template-columns: 1fr; }
   .mobile-quick-actions { grid-template-columns: 1fr; }
+
+  .mobile-stat-card .stat-value {
+    font-size: 28px;
+  }
+
+  .mobile-ticket-card .card-title {
+    font-size: 16px;
+  }
+
+  .header-left h2 { font-size: 17px; }
 }
 
 /* Desktop adjustments */

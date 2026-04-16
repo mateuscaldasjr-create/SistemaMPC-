@@ -153,11 +153,11 @@ export default function Dashboard() {
       <div className="charts-grid">
         <div className="chart-card">
           <h3>Chamados por Mês</h3>
-          <ResponsiveContainer width="100%" height={250}>
+          <ResponsiveContainer width="100%" height={280}>
             <BarChart data={charts.ticketsMonthly}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
+              <XAxis dataKey="month" tick={{ fontSize: 14 }} />
+              <YAxis tick={{ fontSize: 14 }} />
               <Tooltip />
               <Bar dataKey="total" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Total" />
               <Bar dataKey="concluidos" fill="#10b981" radius={[4, 4, 0, 0]} name="Concluídos" />
@@ -167,12 +167,12 @@ export default function Dashboard() {
 
         <div className="chart-card">
           <h3>Chamados por Status</h3>
-          <ResponsiveContainer width="100%" height={250}>
+          <ResponsiveContainer width="100%" height={280}>
             <PieChart>
               <Pie
                 data={charts.ticketsByStatus.map(s => ({ name: statusLabels[s.status] || s.status, value: s.count }))}
                 cx="50%" cy="50%"
-                innerRadius={60} outerRadius={90}
+                innerRadius={60} outerRadius={100}
                 paddingAngle={3}
                 dataKey="value"
               >
@@ -183,10 +183,10 @@ export default function Dashboard() {
               <Tooltip />
             </PieChart>
           </ResponsiveContainer>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center', marginTop: 8 }}>
             {charts.ticketsByStatus.map((s, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColors[s.status] || COLORS[i] }}></div>
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14 }}>
+                <div style={{ width: 10, height: 10, borderRadius: '50%', background: statusColors[s.status] || COLORS[i] }}></div>
                 {statusLabels[s.status]} ({s.count})
               </div>
             ))}
@@ -278,16 +278,16 @@ export default function Dashboard() {
           </div>
           <div className="card-body">
             {charts.technicianPerformance.map((tech, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border-light)' }}>
-                <div style={{ width: 36, height: 36, borderRadius: '50%', background: `linear-gradient(135deg, ${COLORS[i]}, ${COLORS[(i+1) % COLORS.length]})`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 13, fontWeight: 600 }}>
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--border-light)' }}>
+                <div style={{ width: 44, height: 44, borderRadius: '50%', background: `linear-gradient(135deg, ${COLORS[i]}, ${COLORS[(i+1) % COLORS.length]})`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 15, fontWeight: 600, flexShrink: 0 }}>
                   {tech.name.split(' ').map(n => n[0]).join('').substring(0, 2)}
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600 }}>{tech.name}</div>
-                  <div style={{ fontSize: 12, color: '#64748b' }}>{tech.concluidos} concluídos / {tech.total} total</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>{tech.name}</div>
+                  <div style={{ fontSize: 14, color: '#64748b', marginTop: 2 }}>{tech.concluidos} concluídos / {tech.total} total</div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: tech.pendentes > 0 ? '#f59e0b' : '#10b981' }}>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: tech.pendentes > 0 ? '#f59e0b' : '#10b981' }}>
                     {tech.pendentes} pendentes
                   </div>
                 </div>
@@ -297,7 +297,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div style={{ textAlign: 'center', padding: '24px 0', color: '#94a3b8', fontSize: 12 }}>
+      <div style={{ textAlign: 'center', padding: '24px 0', color: '#94a3b8', fontSize: 13 }}>
         MPC Service v1.0 - Desenvolvido por MPC AI Solutions
       </div>
     </Layout>
