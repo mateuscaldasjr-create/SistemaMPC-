@@ -5,8 +5,25 @@ process.env.NODE_ENV = 'production';
 
 let app;
 let loadError = null;
+let loadStep = 'inicio';
 
 try {
+  loadStep = 'express';
+  const express = require('express');
+
+  loadStep = 'cors';
+  const cors = require('cors');
+
+  loadStep = 'supabase';
+  require('@supabase/supabase-js');
+
+  loadStep = 'bcryptjs';
+  require('bcryptjs');
+
+  loadStep = 'jsonwebtoken';
+  require('jsonwebtoken');
+
+  loadStep = 'server/app';
   app = require('../server/app');
 
   // Health check
@@ -21,16 +38,15 @@ try {
   });
 } catch (err) {
   loadError = err;
-  // Criar app mínimo para retornar erro útil
   const express = require('express');
   app = express();
-  app.use(express.json());
   app.use((req, res) => {
     res.status(500).json({
-      error: 'Erro ao inicializar servidor: ' + loadError.message,
-      details: loadError.stack,
+      error: 'Falha no passo: ' + loadStep,
+      message: loadError.message,
       hasSupabaseUrl: !!process.env.SUPABASE_URL,
       hasSupabaseKey: !!process.env.SUPABASE_SERVICE_KEY,
+      nodeVersion: process.version,
     });
   });
 }
